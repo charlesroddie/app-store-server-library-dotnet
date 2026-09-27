@@ -204,32 +204,13 @@ public class AppStoreServerApiClient(
 
         try
         {
-            HttpResponseMessage httpResponse;
-
-            if (method == HttpMethod.Get)
+            var request = new HttpRequestMessage(method, builder.Uri);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (body != null)
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                httpResponse = await this.httpClient.SendAsync(request);
+                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
             }
-            else if (method == HttpMethod.Post)
-            {
-                var request = new HttpRequestMessage(HttpMethod.Post, builder.Uri);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                request.Content = new StringContent(body!, Encoding.UTF8, "application/json");
-                httpResponse = await this.httpClient.SendAsync(request);
-            }
-            else if (method == HttpMethod.Put)
-            {
-                var request = new HttpRequestMessage(HttpMethod.Put, builder.Uri);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                request.Content = new StringContent(body!, Encoding.UTF8, "application/json");
-                httpResponse = await this.httpClient.SendAsync(request);
-            }
-            else
-            {
-                throw new NotSupportedException($"Method {method} not supported");
-            }
+            HttpResponseMessage httpResponse = await this.httpClient.SendAsync(request);
 
             string responseContent = await httpResponse.Content.ReadAsStringAsync();
 
