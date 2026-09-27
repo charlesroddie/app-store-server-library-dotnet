@@ -514,4 +514,72 @@ public class SignedDataVerifierTest
             Assert.Contains("Chain validation failed", exception.Message);
         }
     }
+
+    [Theory]
+    [InlineData(long.MaxValue)]
+    [InlineData(-20000000000000)]
+    public async Task VerifyAndDecode_SignedDateOutOfRange_Fails(long signedDate)
+    {
+        string header = JsonSerializer.Serialize(
+            new { alg = "ES256", x5c = new[] { LeafCertInvalidOid, IntermediateCa, RootCaBase64Encoded } }
+        );
+        string signedPayload =
+            Base64UrlEncoder.Encode(header) + "." + Base64UrlEncoder.Encode($"{{\"signedDate\":{signedDate}}}") + ".AA";
+
+        var dataVerifier = new SignedDataVerifier(
+            Convert.FromBase64String(RootCaBase64Encoded),
+            false,
+            AppStoreEnvironment.Sandbox,
+            BundleId
+        );
+
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () => dataVerifier.VerifyAndDecodeTransaction(signedPayload)
+        );
+
+        Assert.Contains("signedDate", exception.Message);
+    }
+
+    [Fact]
+    public async Task VerifyAndDecode_TransactionWrongBundleId_Fails()
+    {
+        string signedTransaction = await File.ReadAllTextAsync(
+            "./MockedSignedData/InputFor_VerifyAndDecode_TransactionInfo_Success.txt"
+        );
+        var dataVerifier = new SignedDataVerifier(
+            Convert.FromBase64String(RootCaBase64Encoded),
+            false,
+            AppStoreEnvironment.Sandbox,
+            "com.other"
+        );
+
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () => dataVerifier.VerifyAndDecodeTransaction(signedTransaction)
+        );
+
+        Assert.Contains("BundleId in payload does not match expected bundleId", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("InputFor_VerifyAndDecode_TransactionInfo_Success.txt", true)]
+    [InlineData("InputFor_VerifyAndDecode_RenewalInfo_Success.txt", false)]
+    public async Task VerifyAndDecode_TransactionOrRenewalInfoWrongEnvironment_Fails(string file, bool isTransaction)
+    {
+        string signedPayload = await File.ReadAllTextAsync("./MockedSignedData/" + file);
+        var dataVerifier = new SignedDataVerifier(
+            Convert.FromBase64String(RootCaBase64Encoded),
+            false,
+            AppStoreEnvironment.Production,
+            BundleId
+        );
+
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () =>
+                isTransaction
+                    ? dataVerifier.VerifyAndDecodeTransaction(signedPayload)
+                    : dataVerifier.VerifyAndDecodeRenewalInfo(signedPayload)
+        );
+
+        Assert.Contains("Environment in payload does not match expected environment", exception.Message);
+    }
 }

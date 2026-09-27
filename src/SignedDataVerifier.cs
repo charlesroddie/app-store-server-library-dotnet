@@ -56,19 +56,8 @@ public class SignedDataVerifier(
             _ => throw new VerificationException("Notification payload has neither data nor summary"),
         };
 
-        if (payloadEnvironment != environment.Name)
-        {
-            throw new VerificationException(
-                $"Environment in payload does not match expected environment. Expected : {environment}, Actual : {payloadEnvironment}"
-            );
-        }
-
-        if (payloadBundleId != bundleId)
-        {
-            throw new VerificationException(
-                $"BundleId in payload does not match expected bundleId. Expected : {bundleId}, Actual : {payloadBundleId}"
-            );
-        }
+        ValidateEnvironment(payloadEnvironment);
+        ValidateBundleId(payloadBundleId);
 
         return decodedPayload;
     }
@@ -84,14 +73,23 @@ public class SignedDataVerifier(
     {
         string payload = await VerifySignedData(signedPayload);
 
+        JwsTransactionDecodedPayload transaction;
         try
         {
-            return JsonSerializer.Deserialize(payload, AppStoreJsonContext.Default.JwsTransactionDecodedPayload)!;
+            transaction = JsonSerializer.Deserialize(
+                payload,
+                AppStoreJsonContext.Default.JwsTransactionDecodedPayload
+            )!;
         }
         catch (Exception e)
         {
             throw new VerificationException($"Error deserializing transaction payload. Payload : {payload}", e);
         }
+
+        ValidateEnvironment(transaction.Environment);
+        ValidateBundleId(transaction.BundleId);
+
+        return transaction;
     }
 
     /// <summary>
@@ -105,14 +103,22 @@ public class SignedDataVerifier(
     {
         string payload = await VerifySignedData(signedPayload);
 
+        JWSRenewalInfoDecodedPayload renewalInfo;
         try
         {
-            return JsonSerializer.Deserialize(payload, AppStoreJsonContext.Default.JWSRenewalInfoDecodedPayload)!;
+            renewalInfo = JsonSerializer.Deserialize(
+                payload,
+                AppStoreJsonContext.Default.JWSRenewalInfoDecodedPayload
+            )!;
         }
         catch (Exception e)
         {
             throw new VerificationException($"Error deserializing renewal info payload. Payload : {payload}", e);
         }
+
+        ValidateEnvironment(renewalInfo.Environment);
+
+        return renewalInfo;
     }
 
     private async Task<string> VerifySignedData(string signedPayload)
@@ -292,19 +298,49 @@ public class SignedDataVerifier(
 
     private static DateTime? ReadSignedDate(string payloadJson)
     {
+        long milliseconds;
         try
         {
             using JsonDocument document = JsonDocument.Parse(payloadJson);
-            return
-                document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("signedDate", out JsonElement signedDate)
-                && signedDate.TryGetInt64(out long milliseconds)
-                ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime
-                : null;
+            if (
+                document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("signedDate", out JsonElement signedDate)
+                || !signedDate.TryGetInt64(out milliseconds)
+            )
+            {
+                return null;
+            }
         }
         catch (JsonException e)
         {
             throw new VerificationException("Payload could not be decoded", e);
+        }
+
+        if (milliseconds < 0 || milliseconds > DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
+        {
+            throw new VerificationException($"signedDate {milliseconds} is out of range");
+        }
+
+        return DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime;
+    }
+
+    private void ValidateEnvironment(string? payloadEnvironment)
+    {
+        if (payloadEnvironment != environment.Name)
+        {
+            throw new VerificationException(
+                $"Environment in payload does not match expected environment. Expected : {environment}, Actual : {payloadEnvironment}"
+            );
+        }
+    }
+
+    private void ValidateBundleId(string? payloadBundleId)
+    {
+        if (payloadBundleId != bundleId)
+        {
+            throw new VerificationException(
+                $"BundleId in payload does not match expected bundleId. Expected : {bundleId}, Actual : {payloadBundleId}"
+            );
         }
     }
 }
