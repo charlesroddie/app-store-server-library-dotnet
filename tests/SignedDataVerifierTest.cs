@@ -404,4 +404,50 @@ public class SignedDataVerifierTest
 
         Assert.Contains("Certificate chain has 2 elements", exception.Message);
     }
+
+    private const string SummaryNotification = """
+        {"notificationType":"RENEWAL_EXTENSION","subtype":"SUMMARY","notificationUUID":"002e14d5-51f5-4503-b5a8-c3a1af68eb20","version":"2.0","signedDate":1698148900000,
+        "summary":{"requestIdentifier":"efb27071-45a4-4aca-9854-2a1e9146f265","environment":"LocalTesting","appAppleId":41234,"bundleId":"com.example",
+        "productId":"com.example.product","storefrontCountryCodes":["CAN","USA","MEX"],"failedCount":5,"succeededCount":10}}
+        """;
+
+    private static string UnsignedJws(string payload) =>
+        Base64UrlEncoder.Encode("{\"alg\":\"ES256\"}") + "." + Base64UrlEncoder.Encode(payload) + ".AA";
+
+    private static SignedDataVerifier LocalTestingVerifier(string bundleId) =>
+        new(Convert.FromBase64String(RootCaBase64Encoded), false, AppStoreEnvironment.LocalTesting, bundleId);
+
+    [Fact]
+    public async Task VerifyAndDecode_SummaryNotification_Success()
+    {
+        ResponseBodyV2DecodedPayload result = await LocalTestingVerifier(BundleId)
+            .VerifyAndDecodeNotification(UnsignedJws(SummaryNotification));
+
+        Assert.Null(result.Data);
+        Assert.NotNull(result.Summary);
+        Assert.Equal(41234, result.Summary.AppAppleId);
+        Assert.Equal(["CAN", "USA", "MEX"], result.Summary.StorefrontCountryCodes);
+        Assert.Equal(5, result.Summary.FailedCount);
+        Assert.Equal(10, result.Summary.SucceededCount);
+    }
+
+    [Fact]
+    public async Task VerifyAndDecode_SummaryNotificationWrongBundleId_Fails()
+    {
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () => LocalTestingVerifier("com.other").VerifyAndDecodeNotification(UnsignedJws(SummaryNotification))
+        );
+
+        Assert.Contains("BundleId in payload does not match expected bundleId", exception.Message);
+    }
+
+    [Fact]
+    public async Task VerifyAndDecode_NotificationWithoutDataOrSummary_Fails()
+    {
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () => LocalTestingVerifier(BundleId).VerifyAndDecodeNotification(UnsignedJws("{}"))
+        );
+
+        Assert.Contains("neither data nor summary", exception.Message);
+    }
 }

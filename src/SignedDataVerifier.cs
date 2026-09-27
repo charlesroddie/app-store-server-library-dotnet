@@ -49,17 +49,24 @@ public class SignedDataVerifier(
             throw new VerificationException($"Error deserializing notification payload. Payload : {payload}", e);
         }
 
-        if (decodedPayload.Data.Environment != environment.Name)
+        (string payloadEnvironment, string payloadBundleId) = decodedPayload switch
+        {
+            { Data: { } data } => (data.Environment, data.BundleId),
+            { Summary: { } summary } => (summary.Environment, summary.BundleId),
+            _ => throw new VerificationException("Notification payload has neither data nor summary"),
+        };
+
+        if (payloadEnvironment != environment.Name)
         {
             throw new VerificationException(
-                $"Environment in payload does not match expected environment. Expected : {environment}, Actual : {decodedPayload.Data.Environment}"
+                $"Environment in payload does not match expected environment. Expected : {environment}, Actual : {payloadEnvironment}"
             );
         }
 
-        if (decodedPayload.Data.BundleId != bundleId)
+        if (payloadBundleId != bundleId)
         {
             throw new VerificationException(
-                $"BundleId in payload does not match expected bundleId. Expected : {bundleId}, Actual : {decodedPayload.Data.BundleId}"
+                $"BundleId in payload does not match expected bundleId. Expected : {bundleId}, Actual : {payloadBundleId}"
             );
         }
 
