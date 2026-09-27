@@ -44,9 +44,9 @@ public class SignedDataVerifier(
                 AppStoreJsonContext.Default.ResponseBodyV2DecodedPayload
             )!;
         }
-        catch
+        catch (Exception e)
         {
-            throw new VerificationException($"Error deserializing notification payload. Payload : {payload}");
+            throw new VerificationException($"Error deserializing notification payload. Payload : {payload}", e);
         }
 
         if (decodedPayload.Data.Environment != environment.Name)
@@ -81,9 +81,9 @@ public class SignedDataVerifier(
         {
             return JsonSerializer.Deserialize(payload, AppStoreJsonContext.Default.JwsTransactionDecodedPayload)!;
         }
-        catch
+        catch (Exception e)
         {
-            throw new VerificationException($"Error deserializing transaction payload. Payload : {payload}");
+            throw new VerificationException($"Error deserializing transaction payload. Payload : {payload}", e);
         }
     }
 
@@ -102,9 +102,9 @@ public class SignedDataVerifier(
         {
             return JsonSerializer.Deserialize(payload, AppStoreJsonContext.Default.JWSRenewalInfoDecodedPayload)!;
         }
-        catch
+        catch (Exception e)
         {
-            throw new VerificationException($"Error deserializing renewal info payload. Payload : {payload}");
+            throw new VerificationException($"Error deserializing renewal info payload. Payload : {payload}", e);
         }
     }
 
@@ -125,10 +125,18 @@ public class SignedDataVerifier(
 
         // Decode the header and the payload , which are the 1st and 2nd parts of the payload
         // We do not use a JsonWebToken to parse the token because it does not expose the x5c claim that we need to verify the signature
-        string headerJson = Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(parts[0]));
-        string payloadJson = Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(parts[1]));
-
-        var header = JsonSerializer.Deserialize(headerJson, AppStoreJsonContext.Default.JWSDecodedHeader);
+        string payloadJson;
+        JWSDecodedHeader? header;
+        try
+        {
+            string headerJson = Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(parts[0]));
+            payloadJson = Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(parts[1]));
+            header = JsonSerializer.Deserialize(headerJson, AppStoreJsonContext.Default.JWSDecodedHeader);
+        }
+        catch (Exception e)
+        {
+            throw new VerificationException("Payload header or body could not be decoded", e);
+        }
 
         //Check if Environment is local testing, in this case data may not be signed by the App Store, and verification should be skipped
         if (environment == AppStoreEnvironment.LocalTesting)
@@ -150,10 +158,17 @@ public class SignedDataVerifier(
         //See Apple implementation for Java : https://github.com/apple/app-store-server-library-java/blob/main/src/main/java/com/apple/itunes/storekit/verification/ChainVerifier.java#L70C14-L71C90
         //or Node : https://github.com/apple/app-store-server-library-node/blob/main/jws_verification.ts#L185
         X509Certificate2Collection col = new();
-        foreach (string c in header.x5c[..2])
+        try
         {
-            byte[] bytes = Convert.FromBase64String(c);
-            col.Add(new X509Certificate2(bytes));
+            foreach (string c in header.x5c[..2])
+            {
+                byte[] bytes = Convert.FromBase64String(c);
+                col.Add(new X509Certificate2(bytes));
+            }
+        }
+        catch (Exception e)
+        {
+            throw new VerificationException("x5c certificates could not be decoded", e);
         }
 
         //As the header contains a x5c parameter we need to check for the certificate chain
@@ -166,7 +181,7 @@ public class SignedDataVerifier(
 
         //We now need to verify the signature using the leaf (first) certificate of the x5c parameter.
         //This is done by retrieving it's public key and calling the JWT library to verify the signature
-        var leafCert = new X509Certificate2(Convert.FromBase64String(header.x5c[0]));
+        var leafCert = col[0];
 
         var securityTokenHandler = new JsonWebTokenHandler();
         var leafPublicKey = new ECDsaSecurityKey(leafCert.GetECDsaPublicKey());

@@ -1,3 +1,4 @@
+using Microsoft.IdentityModel.Tokens;
 using Mimo.AppStoreServerLibrary;
 using Mimo.AppStoreServerLibrary.Exceptions;
 using Mimo.AppStoreServerLibrary.Models;
@@ -284,5 +285,47 @@ public class SignedDataVerifierTest
         );
 
         Assert.Contains("Environment in payload does not match expected environment.", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("{\"alg\":\"ES256\",\"x5c\":[\"!\",\"!\",\"!\"]}")]
+    [InlineData("{\"alg\":\"ES256\",\"x5c\":[\"AAAA\",\"AAAA\",\"AAAA\"]}")]
+    public async Task VerifyAndDecode_MalformedSignedData_ThrowsVerificationException(string header)
+    {
+        string signedPayload = Base64UrlEncoder.Encode(header) + ".e30.AA";
+
+        var dataVerifier = new SignedDataVerifier(
+            Convert.FromBase64String(RootCaBase64Encoded),
+            false,
+            AppStoreEnvironment.Sandbox,
+            BundleId
+        );
+
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () => dataVerifier.VerifyAndDecodeNotification(signedPayload)
+        );
+
+        Assert.NotNull(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task VerifyAndDecode_UndeserializablePayload_KeepsInnerException()
+    {
+        string signedPayload =
+            Base64UrlEncoder.Encode("{}") + "." + Base64UrlEncoder.Encode("{\"signedDate\":\"x\"}") + ".AA";
+
+        var dataVerifier = new SignedDataVerifier(
+            Convert.FromBase64String(RootCaBase64Encoded),
+            false,
+            AppStoreEnvironment.LocalTesting,
+            BundleId
+        );
+
+        var exception = await Assert.ThrowsAsync<VerificationException>(
+            () => dataVerifier.VerifyAndDecodeTransaction(signedPayload)
+        );
+
+        Assert.IsType<System.Text.Json.JsonException>(exception.InnerException);
     }
 }
