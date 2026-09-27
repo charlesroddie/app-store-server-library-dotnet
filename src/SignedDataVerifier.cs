@@ -179,7 +179,10 @@ public class SignedDataVerifier(
         }
 
         //As the header contains a x5c parameter we need to check for the certificate chain
-        bool certChainIsValid = this.CheckCertificateChain(col);
+        // As Apple's libraries do, validate offline at the time the payload was signed
+        DateTime verificationTime = enableOnlineChecks ? DateTime.Now : ReadSignedDate(payloadJson) ?? DateTime.Now;
+
+        bool certChainIsValid = this.CheckCertificateChain(col, verificationTime);
 
         if (!certChainIsValid)
         {
@@ -224,7 +227,7 @@ public class SignedDataVerifier(
     /// Also see following discussion on Apple forum for better explanations : https://forums.developer.apple.com/forums/thread/693351
     /// </summary>
     /// <returns>If the certificate chain is valid</returns>
-    private bool CheckCertificateChain(X509Certificate2Collection certificates)
+    private bool CheckCertificateChain(X509Certificate2Collection certificates, DateTime verificationTime)
     {
         var chain = new X509Chain();
 
@@ -235,6 +238,7 @@ public class SignedDataVerifier(
         // Also an explanation of the use of OCSP can be found here : https://forums.developer.apple.com/forums/thread/693351
         // The default value for DisableOnlineCertificateRevocationCheck is false
         chain.ChainPolicy.RevocationMode = enableOnlineChecks ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
+        chain.ChainPolicy.VerificationTime = verificationTime;
 
         // We need to set the trust mode to custom root trust so we can add our own root certificate
         // This is needed because the root certificate is not in the default trust store
@@ -284,5 +288,23 @@ public class SignedDataVerifier(
         }
 
         return isValid;
+    }
+
+    private static DateTime? ReadSignedDate(string payloadJson)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(payloadJson);
+            return
+                document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("signedDate", out JsonElement signedDate)
+                && signedDate.TryGetInt64(out long milliseconds)
+                ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime
+                : null;
+        }
+        catch (JsonException e)
+        {
+            throw new VerificationException("Payload could not be decoded", e);
+        }
     }
 }

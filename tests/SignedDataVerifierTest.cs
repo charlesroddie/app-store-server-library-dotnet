@@ -450,4 +450,68 @@ public class SignedDataVerifierTest
 
         Assert.Contains("neither data nor summary", exception.Message);
     }
+
+    [Theory]
+    [InlineData(-7, true)]
+    [InlineData(-1, false)]
+    public async Task VerifyAndDecode_ExpiredLeaf_ValidatedAtSignedDate(int signedDaysAgo, bool succeeds)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        using var rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var rootRequest = new CertificateRequest("CN=Root", rootKey, HashAlgorithmName.SHA256);
+        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        using X509Certificate2 root = rootRequest.CreateSelfSigned(now.AddDays(-30), now.AddDays(30));
+
+        using var intermediateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var intermediateRequest = new CertificateRequest("CN=Intermediate", intermediateKey, HashAlgorithmName.SHA256);
+        intermediateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        intermediateRequest.CertificateExtensions.Add(
+            new X509Extension("1.2.840.113635.100.6.2.1", new byte[] { 0x05, 0x00 }, false)
+        );
+        using X509Certificate2 intermediate = intermediateRequest
+            .Create(root, now.AddDays(-20), now.AddDays(20), new byte[] { 1 })
+            .CopyWithPrivateKey(intermediateKey);
+
+        using var leafKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var leafRequest = new CertificateRequest("CN=Leaf", leafKey, HashAlgorithmName.SHA256);
+        leafRequest.CertificateExtensions.Add(
+            new X509Extension("1.2.840.113635.100.6.11.1", new byte[] { 0x05, 0x00 }, false)
+        );
+        using X509Certificate2 leaf = leafRequest.Create(
+            intermediate,
+            now.AddDays(-10),
+            now.AddDays(-5),
+            new byte[] { 2 }
+        );
+
+        string header = JsonSerializer.Serialize(
+            new
+            {
+                alg = "ES256",
+                x5c = new[] { leaf, intermediate, root }.Select(c => Convert.ToBase64String(c.RawData)),
+            }
+        );
+        string payload =
+            $"{{\"environment\":\"Sandbox\",\"bundleId\":\"{BundleId}\",\"signedDate\":{now.AddDays(signedDaysAgo).ToUnixTimeMilliseconds()}}}";
+        string signingInput = Base64UrlEncoder.Encode(header) + "." + Base64UrlEncoder.Encode(payload);
+        string signature = Base64UrlEncoder.Encode(
+            leafKey.SignData(System.Text.Encoding.ASCII.GetBytes(signingInput), HashAlgorithmName.SHA256)
+        );
+
+        var dataVerifier = new SignedDataVerifier(root.RawData, false, AppStoreEnvironment.Sandbox, BundleId);
+        Task<JwsTransactionDecodedPayload> verify = dataVerifier.VerifyAndDecodeTransaction(
+            signingInput + "." + signature
+        );
+
+        if (succeeds)
+        {
+            Assert.Equal(BundleId, (await verify).BundleId);
+        }
+        else
+        {
+            var exception = await Assert.ThrowsAsync<VerificationException>(() => verify);
+            Assert.Contains("Chain validation failed", exception.Message);
+        }
+    }
 }
