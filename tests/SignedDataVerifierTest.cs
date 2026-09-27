@@ -181,6 +181,7 @@ public class SignedDataVerifierTest
         );
 
         Assert.Contains("Payload signature could not be verified", exception.Message);
+        Assert.NotNull(exception.InnerException);
     }
 
     [Fact]

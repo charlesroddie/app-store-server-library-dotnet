@@ -202,7 +202,10 @@ public class SignedDataVerifier(
 
         if (!result.IsValid)
         {
-            throw new VerificationException($"Payload signature could not be verified : {result.Exception.Message}");
+            throw new VerificationException(
+                $"Payload signature could not be verified : {result.Exception.Message}",
+                result.Exception
+            );
         }
 
         return payloadJson;
